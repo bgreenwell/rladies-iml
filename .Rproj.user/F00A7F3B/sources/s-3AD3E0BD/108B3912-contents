@@ -1,0 +1,991 @@
+---
+title: "Peeking Inside the 'Black Box'"
+subtitle: "Post-Hoc Interpretability"
+author: "Brandon M. Greenwell"
+institute: "84.51\u00b0/University of Cincinnati"
+date: "R-Ladies Utrecht: `r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    css: ["default", "default-fonts", "custom.css", "rladies", "rladies-fonts"]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+## Shameless plug...`r emo::ji("package")`/`r emo::ji("books")`
+
+```{r books, echo=FALSE, out.width="100%"}
+knitr::include_graphics("images/books.png")
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  # cache = TRUE,
+  crayon.enabled = TRUE,
+  dev = "svg",     
+  echo = TRUE,
+  error = FALSE,
+  fig.asp = 0.618,
+  fig.width = 6,
+  fig.retina = 3,  
+  out.width = "100%",
+  fig.align = "center",
+  size = "small",
+  message = FALSE,
+  warning = FALSE
+)
+
+# Set global R options
+options(
+  width = 9999,
+  servr.daemon = TRUE
+)
+
+ladd <- function(x, data = NULL, ..., plot = trellis.last.object()) {
+  return(plot + eval(substitute(latticeExtra::layer(foo, data = data, ...), 
+                                list(foo = substitute(x)))))
+}
+```
+
+
+---
+
+## Good resources
+
+* [Interpretable Machine Learning: A Guide for Making Black Box Models Explainable](https://christophm.github.io/interpretable-ml-book/)
+  
+  - Christoph Molnar is also the creator of the well-known [iml package](https://cran.r-project.org/package=iml)
+  
+* In-progress [article](https://github.com/bgreenwell/rjournal-shapley) on Shapley explanations for [*The R Journal*](https://journal.r-project.org/)
+
+  - Consider contributing `r emo::ji("smile")`
+  
+* [Explanatory Model Analysis: Explore, Explain, and Examine Predictive Models. With examples in R and Python](https://ema.drwhy.ai/)
+
+  - Authors associated with the [DALEX](https://github.com/ModelOriented/DALEX) ecosystem for IML
+  
+
+---
+
+## Agenda
+
+Post-hoc methods/packages to help comprehend various aspects of any fitted model:
+
+* feature importance via [vip](https://journal.r-project.org/archive/2020/RJ-2020-013/index.html)
+* feature effects via [pdp](https://journal.r-project.org/archive/2017/RJ-2017-016/index.html)
+* feature contributions via [fastshap](https://github.com/bgreenwell/fastshap)
+
+Plenty of others R `r emo::ji('package')`s available as well! For example, [iml](https://cran.r-project.org/package=iml) and [DALEX](https://cran.r-project.org/package=DALEX)
+
+For a somewhat recent overview, see [Landscape of R packages for eXplainable
+Artificial Intelligence](https://arxiv.org/pdf/2009.13248.pdf)
+
+
+---
+
+## CoIL data challenge
+
+The two goals of the CoIL challenge were: 
+
+  1. to build a model from the 5,822 training records and use it to find the top 20% of customers in the test set who are most likely to own caravan insurance policies and 
+  
+  2. to provide insight into why some customers have caravan insurance policies and how they
+differ from other customers.
+
+Source: https://liacs.leidenuniv.nl/~puttenpwhvander/library/cc2000/
+
+
+---
+
+## CoIL data challenge
+
+```{r ticdata}
+# Load insurance company data from CoIL Challenge 2000
+data(ticdata, package = "kernlab")
+
+# Split into train/test (same splits used in challenge)
+tic.trn <- ticdata[1:5822, ]
+tic.tst <- ticdata[-(1:5822), ]
+
+# Class frequencies
+(tab <- table(tic.trn$CARAVAN))
+proportions(tab)  # similar to test data; ~ 16:1 ratio
+```
+
+
+---
+
+## Variable importance
+
+* For a more in-depth overview, see [Greenwell and Boehmke (2020)](https://journal.r-project.org/archive/2020/RJ-2020-013/index.html)
+
+* Four our purposes, think of variable importance (VI) as the ".green[...extent to which a feature has a 'meaningful' impact on the predicted outcome.]"
+
+* A more formal definition can be found in [van der Laan (2006)](https://www.degruyter.com/document/doi/10.2202/1557-4679.1008/html?lang=en) 
+
+* We'll discuss several types of VI methods:
+
+  - model-specific (e.g., decision trees)
+  - variance-based measures; see [Greenwell et. al., 2018](https://arxiv.org/abs/1805.04755)
+  - permutation importance
+  - Aggregated Shapley values
+
+
+---
+class: middle, center
+
+# Why the vip `r emo::ji("package")`?
+
+![](images/vip-drake.png)
+
+
+---
+
+## Model-specific VI scores
+
+Examples of model classes where "natural" measures of variable importance exist:
+
+* Decision trees and tree-based ensembles
+
+  - **One of the best methods, IMO**: [GUIDE](https://pages.stat.wisc.edu/~loh/guide.html) for VI scoring/ranking; check out [Loh and Zhou (2022)](https://jds-online.org/journal/JDS/article/1250/info) for the deets
+  
+      * Works for a wide range of response types
+      * Missing values
+      * Interaction effects
+      * And the list goes on...
+
+* Generalized linear models (e.g., standardized coefficients or test statistics)
+
+* Neural networks (e.g., Garson's method and Olden's method)
+
+* Multivariate adaptive regression splines (MARS)
+
+Check out the [vip paper](https://journal.r-project.org/archive/2020/RJ-2020-013/index.html) for examples in R!
+
+
+---
+
+## CoIL challenge: random forest
+
+```{r ticdata-rfo, cache=TRUE}
+library(ranger)
+
+# Fit some (default) probability forests with different VI measures
+set.seed(926)  # for reproducibility
+tic.rfo1 <- ranger(CARAVAN ~ ., probability = TRUE, data = tic.trn, 
+                   importance = "impurity")
+(tic.rfo2 <- ranger(CARAVAN ~ ., probability = TRUE, data = tic.trn, 
+                    importance = "impurity_corrected"))
+```
+
+
+---
+
+## CoIL challenge: random forest
+
+```{r ticdata-rfos-vips, cache=TRUE, out.width="80%"}
+library(patchwork)
+library(vip)
+
+vip(tic.rfo1, include_type = TRUE) + vip(tic.rfo2, include_type = TRUE)
+```
+
+
+---
+
+## Permutation importance
+
+Permutation importance is .tomato[any measure of how much *worst* a model's predictions are after randomly permuting a particular feature column].
+
+<img src="images/permutation-importance-01.png" style="width: 90%" />
+
+--
+
+<img src="images/permutation-importance-02.png" style="width: 90%" />
+
+
+---
+
+## Permutation importance
+
+.center.medium[**A simple algorithm for constructing permutation VI scores**]
+
+Let $X_1, X_2, \dots, X_j$ be the features of interest and let $\mathcal{M}_{orig}$ be the baseline performance metric for the trained model; for brevity, we'll assume smaller is better (e.g., classification error or RMSE). The permutation-based importance scores can be computed as follows:
+
+1. For $i = 1, 2, \dots, j$:
+
+  a. Permute the values of feature $X_i$ in the training data.
+  
+  b. Recompute the performance metric on the permuted data $\mathcal{M}_{perm}$.
+  
+  c. Record the difference from baseline using $vi\left(X_i\right) = \mathcal{M}_{perm} - \mathcal{M}_{orig}$.
+
+2. Return the VI scores $vi\left(X_1\right), vi\left(X_2\right), \dots, vi\left(X_j\right)$.
+
+Do this many times for each feature and average the results!
+
+
+---
+
+## Why permutation-based importance?
+
+.font120[
+
+* *Model-agnostic* (.blue[can be applied to any algorithm])
+
+  - Makes it easier to compare across models (`r emo::ji("apple")` vs. `r emo::ji("apple")`)
+
+* Easily parallelized
+
+* Readily available ([scikit-learn](https://scikit-learn.org/stable/modules/permutation_importance.html), **Data.dodgerblue[Robot]**, [vip](https://cran.r-project.org/package=vip), etc.)
+
+  - There are several implementations in R, including [vip](https://cran.r-project.org/package=vip), [iml](https://cran.r-project.org/package=iml), [ingredients](https://cran.r-project.org/package=ingredients), and [mmpf](https://cran.r-project.org/package=mmpf)
+
+  - The implementations in [scikit-learn](https://scikit-learn.org/stable/modules/permutation_importance.html), [vip](https://cran.r-project.org/package=vip), and [iml](https://cran.r-project.org/package=iml) are parallelized `r emo::ji("sunglasses")`
+
+]
+
+
+---
+class: middle, center
+
+## Why the vip `r emo::ji("package")`?
+
+Based on **100 repeats** of permutation importance using a random forest fit to a training set with **10k rows** and **10 features**
+
+<img src="images/benchmark-vip.png" style="width: 90%" />
+
+
+---
+
+## Friedman 1 benchmark example
+
+Consider the following regression model:
+\begin{equation}
+  Y_i = 10 \sin\left(\pi X_{1i} X_{2i}\right) + 20 \left(X_{3i} - 0.5\right) ^ 2 + 10 X_{4i} + 5 X_{5i} + \epsilon_i, \quad i = 1, 2, \dots, n,
+\end{equation}
+where $\epsilon_i \stackrel{iid}{\sim} N\left(0, \sigma^2\right)$.
+
+```{r permute-friedman}
+trn <- vip::gen_friedman(500, sigma = 1, seed = 101) # simulate training data
+tibble::as_tibble(trn) # inspect output
+```
+
+
+---
+
+## Friedman 1 benchmark example (PPR)
+
+```{r permute-friedman-nn-result, cache=TRUE, out.width="60%"}
+# Projection pursuit regression fit
+pp <- ppr(y ~ ., data = trn, nterms = 11)
+
+# Use 10 Monte Carlo reps
+set.seed(403) # for reproducibility
+vis <- vi(pp, method = "permute", target = "y", metric = "rsquared",
+          pred_wrapper = predict, nsim = 15)
+vip(vis, geom = "boxplot")
+```
+
+
+---
+
+## Friedman 1 benchmark example (RF)
+
+Most IML-related R packages are .purple[**flexible enough to handle ANY fitted model**]! For example:
+
+```{r friedman1-rf-code, eval=FALSE}
+# Fit a default random forest
+rfo <- ranger::ranger(y ~ ., data = trn)
+
+# Prediction wrapper
+pfun <- function(object, newdata) {
+  predict(object, data = newdata)$predictions
+}
+
+# Mean absolute error
+mae <- function(actual, predicted) {
+  mean(abs(actual - predicted))
+}
+
+# Permutation-based VIP with user-defined MAE metric
+set.seed(1101)  # for reproducibility
+vip(rfo, method = "permute", target = "y", metric = mae,
+    smaller_is_better = TRUE, pred_wrapper = pfun, nsim = 10, geom = "point",
+    all_permutations = TRUE, jitter = TRUE) + theme_bw()
+```
+
+
+---
+
+## Friedman 1 benchmark example (RF)
+
+```{r friedman1-rf-results, cache=TRUE, echo=FALSE}
+# Fit a default random forest
+rfo <- ranger::ranger(y ~ ., data = trn)
+
+# Prediction wrapper
+pfun <- function(object, newdata) {
+  predict(object, data = newdata)$predictions
+}
+
+# Mean absolute error
+mae <- function(actual, predicted) {
+  mean(abs(actual - predicted))
+}
+
+# Permutation-based VIP with user-defined MAE metric
+set.seed(1101)  # for reproducibility
+vip(rfo, method = "permute", target = "y", metric = mae,
+    smaller_is_better = TRUE, pred_wrapper = pfun, nsim = 10, geom = "point",
+    all_permutations = TRUE, jitter = TRUE) + theme_bw()
+```
+
+
+---
+
+## Friedman 1 benchmark example (RF)
+
+```{r friedman1-rf-sparklines-results, eval=FALSE}
+# FIRM-based VI scores with sparklines
+vi(rfo, method = "firm", pred_wrapper = pfun) %>% add_sparklines()
+```
+
+```{r friedman1-sparklines-rf-results, cache=TRUE, echo=FALSE, out.width="70%"}
+# Fit a default random forest
+rfo <- ranger::ranger(y ~ ., data = trn)
+
+# Prediction wrapper
+pfun <- function(object, newdata) {
+  mean(predict(object, data = newdata)$predictions)
+}
+
+# FIRM-based VI scores with sparklines
+vi(rfo, method = "firm", pred_wrapper = pfun) %>%
+  add_sparklines()
+```
+
+
+---
+
+## Permutation importance
+
+.pull-left[
+## Drawbacks
+
+* Should you use the train or test data set for permuting?
+
+* Requires access to the true target values
+
+* Results are random (due to random shuffling of columns)
+
+* Correlated features lead to *extrapolating* `r emo::ji("scream")`
+
+]
+
+.pull-right[
+## Alternatives
+
+* *Leave-one-variable-out* (LOVO) importance
+
+* Conditional variable importance `r set.seed(101); emo::ji("tree")`
+
+* Dropped variable importance
+
+* Permute-and-relearn importance
+
+* Condition-and-relearn importance
+
+]
+
+.center.font150[[Please Stop Permuting Features: An Explanation and Alternatives](https://arxiv.org/abs/1905.03151)]
+
+
+---
+
+## PDPs in a nutshell `r set.seed(1); emo::ji("nut")`
+
+* A plot showing the .tomato[*marginal* (or average) effect] of a small subset of features (usually one or two) .tomato[on the predicted outcome] `r set.seed(2); emo::ji("graph")`
+
+  - The PDP for the $j$-th feature $x_j$ .blue[shows how the average prediction changes as a function of] $x_j$ (the average is taken across the training set, or representative sample thereof)
+
+* Can help determine if the modeled relationship is nearly linear, nonlinear, monotonic, etc.
+
+* .red[Can be misleading in the presence of strong *interaction effects*] `r emo::ji("scream")`
+
+  - .green[*Individual conditional expectation* (ICE) curves], a slight modification to PDPs, don't share this disadvantage 
+  
+  - **think of ICE curves as a marginal effect plot for individual observations**, one curve for each row in the training data
+
+
+---
+
+## How are PDPs constructed (algorithm view `r set.seed(4); emo::ji("vomit")`)?
+
+Constructing a PDP in practice is rather straightforward. To simplify, let $\boldsymbol{z}_s = x_1$ be the predictor variable of interest with unique values $\left\{x_{11}, x_{12}, \dots, x_{1k}\right\}$. The partial dependence of the response on $x_1$ can be constructed as follows:
+
+  * For $i \in \left\{1, 2, \dots, k\right\}$:
+
+    1. Copy the training data and replace the original values of $x_1$ with the constant $x_{1i}$.
+    
+    2. Compute the vector of predicted values from the modified copy of the training data.
+    
+    3. Compute the average prediction to obtain $\bar{f}_1\left(x_{1i}\right)$.
+  
+  * Plot the pairs $\left\{x_{1i}, \bar{f}_1\left(x_{1i}\right)\right\}$ for $i = 1, 2, \dotsc, k$.
+
+.font150.center[.tomato[Rather straightforward to implement actually!] `r set.seed(1); emo::ji("computer")`]
+
+
+---
+
+## CoIL challenge: GUIDE-based VI scores
+
+```{r coil-guide-vi, echo=FALSE}
+vis <- read.table("guide/tic_vi.txt", header = TRUE)
+top <- vis[vis$Type == "A", ]
+tibble::as_tibble(top)
+```
+
+
+---
+
+## CoIL  challenge: PD plots
+
+```{r coil-rf-pd-code, eval=FALSE}
+library(ggplot2)
+library(pdp)
+
+# PD and c-ICE plots
+p1 <- partial(tic.rfo1, pred.var = "APERSAUT")
+p2 <- partial(tic.rfo1, pred.var = "APERSAUT", 
+              ice = TRUE, center = TRUE,  # for c-ICE plots
+              train = tic.trn[sample.int(500), ])  # DON'T PLOT THEM ALL!! #<<
+
+# Display plots 
+(autoplot(p1) + theme_bw() | autoplot(p2, alpha = 0.1) + theme_bw()) /
+  ggplot(tic.trn, aes(x = APERSAUT)) + geom_bar() + theme_bw()
+```
+
+
+---
+
+## CoIL  challenge: PD plots
+
+```{r coil-rf-pd-results, cache=TRUE, echo=FALSE}
+library(ggplot2)
+library(pdp)
+
+# PD and c-ICE plots
+p1 <- partial(tic.rfo1, pred.var = "APERSAUT")
+p2 <- partial(tic.rfo1, pred.var = "APERSAUT", ice = TRUE, center = TRUE,
+              train = tic.trn[sample.int(500), ])
+
+# Display plots 
+(autoplot(p1) + theme_bw() | autoplot(p2, alpha = 0.1) + theme_bw()) /
+  ggplot(tic.trn, aes(x = APERSAUT)) + geom_bar() + theme_bw()
+```
+
+
+---
+
+## PD plots using simple SQL operations
+
+See [pdp issue (#97)](https://github.com/bgreenwell/pdp/issues/97)
+
+```{r pd-spark-data-sets, eval=FALSE}
+# Load required packages
+library(dplyr)
+library(pdp)
+library(sparklyr)
+
+data(boston, package = "pdp")
+
+sc <- spark_connect(master = 'local')
+boston_sc <- copy_to(sc, boston, overwrite = TRUE)
+rfo <- boston_sc %>% ml_random_forest(cmedv ~ ., type = "auto")
+
+# Define plotting grid 
+df1 <- data.frame(lstat = quantile(boston$lstat, probs = 1:19/20)) %>% 
+  copy_to(sc, df = .)
+
+# Remove plotting variable from training data
+df2 <- boston %>%
+  select(-lstat) %>%
+  copy_to(sc, df = .)
+```
+
+
+---
+
+## PD plots using simple SQL operations
+
+```{r pd-spark-aggregate, eval=FALSE}
+# Perform a cross join, compute predictions, then aggregate!
+par_dep <- df1 %>%
+  full_join(df2, by = character()) %>%  # Cartesian product (i.e., cross join)
+  ml_predict(rfo, dataset = .) %>%
+  group_by(lstat) %>%  
+  summarize(yhat = mean(prediction)) %>%  # average for partial dependence
+  select(lstat, yhat) %>%  # select plotting variables
+  arrange(lstat) %>%  # for plotting purposes
+  collect()
+
+# Plot results
+plot(par_dep, type = "l")
+```
+
+```{r pd-spark-plot, echo=FALSE, out.width="50%"}
+knitr::include_graphics("images/spark-pd-plot.png")
+```
+
+
+
+---
+
+## PDPs and ICE curves
+
+.pull-left[
+### Drawbacks
+
+* PDPs for more than one feature (i.e., .blue[visualizing interaction effects]) can be computationally demanding
+
+* Correlated features lead to *extrapolating*
+
+* [Please Stop Permuting Features: An Explanation and Alternatives](https://arxiv.org/abs/1905.03151)
+
+]
+
+.pull-right[
+### Alternatives
+
+* ["Poor man's" PDPs](https://github.com/bgreenwell/pdp/issues/91); historically available in package [plotmo](https://cran.r-project.org/package=plotmo) and now available in [pdp](https://cran.r-project.org/package=pdp) (version >= 0.8.0)
+
+* [Accumulated local effect (ALE) plots](https://arxiv.org/abs/1612.08468)
+
+* [Stratified PDPs](https://arxiv.org/abs/1907.06698)
+
+* Shapley-based dependence plots
+
+]
+
+
+
+---
+
+## Explaining individual predictions
+
+* While discovering which features have the biggest *overall* impact on the model is important, it is often more informative to determine:
+
+  .center.MediumSeaGreen[Which features impacted a specific set of predictions, and how?]
+
+* We can think of this as *local* (or *case-wise*) *variable importance*
+
+  - More generally referred to as *prediction explanations* or .magenta[*feature contributions*]  
+  
+* Many different flavors, but we'll focus on (arguably) the most popular: .dodgerblue[*Shapley explanations*]
+
+
+
+---
+
+## Shapley explanations
+
+For an arbitrary observation $\boldsymbol{x}_0$, Shapley values provide a measure of each feature values contribution to the difference
+
+$$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* `r emo::ji("scream")`
+
+* Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
+
+* The only prediction explanation method to satisfy several useful properties of .dodgerblue[*fairness*]:
+
+  1. Local accuracy (efficiency)
+  2. Missingness
+  3. Consistency (monotonicity)
+
+
+---
+
+## So, what's a Shapley value?
+
+--
+
+In .forestgreen[*cooperative game theory*], the Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*] [(Shapley, 1951)](https://www.rand.org/content/dam/rand/pubs/research_memoranda/2008/RM670.pdf):
+
+$$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$
+
+--
+
+.pull-left[
+
+<img src="https://media.giphy.com/media/3o6MbbwX2g2GA4MUus/giphy.gif?cid=ecf05e471n8c85mbtirkm0ra4x4qa8ezo2idws6ag4f2rvtw&rid=giphy.gif&ct=g" style="width: 80%" />
+
+]
+
+.pull-right[
+
+.font90[
+In the context of predictive modeling:
+
+* .dodgerblue[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
+* .dodgerblue[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the *gain* or *payout*
+* .dodgerblue[**Payout**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations (i.e., baseline)
+
+]
+
+]
+
+
+---
+
+## Approximating Shapley values
+
+.purple[**For the programmers**], implementing approximate Shapley explanations is rather straightforward [(Strumbelj et al., 2014)](https://dl.acm.org/doi/10.1007/s10115-013-0679-x):
+
+.center[
+<img src="images/shapley-algorithm.png" style="width: 100%" class="center" />
+]
+
+
+---
+class: middle
+
+A poor-man's implementation in R...
+
+```{r pseudo-code, eval=FALSE}
+sample.shap <- function(f, obj, R, x, feature, X) {
+  phi <- numeric(R)  # to store Shapley values
+  N <- nrow(X)  # sample size
+  p <- ncol(X)  # number of features
+  b1 <- b2 <- x
+  for (m in seq_len(R)) {
+    w <- X[sample(N, size = 1), ]  # randomly drawn instance  #<<
+    ord <- sample(names(w))  # random permutation of features  #<<
+    swap <- ord[seq_len(which(ord == feature) - 1)]  #<<
+    b1[swap] <- w[swap]  #<<
+    b2[c(swap, feature)] <- w[c(swap, feature)]  #<<
+    phi[m] <- f(obj, newdata = b1) - f(obj, newdata = b2)  #<<
+  }
+  mean(phi)
+}
+```
+
+
+---
+class: middle
+
+## Enter...**fastshap**
+
+* Explaining $N$ instances with $p$ features would require $2 \times m \times N \times p$ calls to $\hat{f}\left(\right)$ 
+* [fastshap](https://cran.r-project.org/package=fastshap) reduces this to $2 \times m \times p$
+
+  - Trick here is to generate all the "Frankenstein instances" up front, and score the differences once: $\hat{f}\left(\boldsymbol{B}_1\right) - \hat{f}\left(\boldsymbol{B}_2\right)$
+  
+      * Logical subsetting! (http://adv-r.had.co.nz/Subsetting.html)
+      
+  - It's also parallelized across predictors (not by default)
+  
+  - Supports Tree SHAP implementations in both the [xgboost](https://cran.r-project.org/package=xgboost) and [lightgbm](https://cran.r-project.org/package=lightgbm) packages (.dodgerblue[woot!])
+  
+  - ~~*Force plots* via [reticulate](https://rstudio.github.io/reticulate/) (works in R markdown): https://bgreenwell.github.io/fastshap/articles/forceplot.html~~
+
+
+---
+class: middle
+
+## Simple benchmark
+
+Explaining a single observation from a [ranger](https://cran.r-project.org/web/packages/ranger/index.html)-based random forest fit to the well-known [titanic](https://cran.r-project.org/package=titanic) data set.
+
+```{r, echo=FALSE, out.width="90%"}
+res <- readRDS("data/benchmark-results.rds")
+
+# Plot results
+par(
+  mar = c(4, 4, 0.1, 0.1),
+  cex.lab = 0.95,
+  cex.axis = 0.8,
+  mgp = c(2, 0.7, 0),
+  tcl = -0.3,
+  las = 1
+)
+palette("Okabe-Ito")
+plot(res$nsim, res$iBreakDown, type = "b", xlab = "Number of Monte Carlo repetitions",
+     ylab = "Time (in seconds)", col = 2,
+     xlim = c(0, max(res$nsim)), ylim = c(0, 10))#ylim = c(0, max(times1, times2, times3)))
+lines(res$nsim, res$iml, type = "b", col = 3)
+lines(res$nsim, res$fastshap, type = "b", col = 4)
+legend("topright", bty = "n",
+       legend = c("iBreakDown", "iml", "fastshap"),
+       lty = 1, pch = 1, col = c(2, 3, 4), inset = 0.02)
+abline(h = 0, lty = 2)
+palette("default")
+```
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-setup}
+library(ggplot2)
+library(ranger)
+library(fastshap)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# Read in the data and clean it up a bit
+titanic <- titanic::titanic_train
+features <- c(
+  "Survived",  # passenger survival indicator
+  "Pclass",    # passenger class
+  "Sex",       # gender
+  "Age",       # age
+  "SibSp",     # number of siblings/spouses aboard
+  "Parch",     # number of parents/children aboard
+  "Fare",      # passenger fare
+  "Embarked"   # port of embarkation
+)
+titanic <- titanic[, features]
+titanic$Survived <- as.factor(titanic$Survived)
+titanic <- na.omit(titanic)  # ...umm?  #<<
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-rfo, eval=TRUE, cache=TRUE}
+# Fit a (default) random forest
+set.seed(1046)  # for reproducibility
+rfo <- ranger(Survived ~ ., data = titanic, probability = TRUE)
+
+# Prediction wrapper for `fastshap::explain()`; has to return a 
+# single (atomic) vector of predictions
+pfun <- function(object, newdata) {  # computes prob(Survived=1|x)
+  predict(object, data = newdata)$predictions[, 2]
+}
+
+# Estimate feature contributions for each imputed training set
+X <- subset(titanic, select = -Survived)  # features only!
+set.seed(1051)  # for reproducibility
+(ex.all <- explain(rfo, X = X, nsim = 100, adjust = TRUE,  pred_wrapper = pfun))  #<<
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+Plotting functions to be replaced with [shapviz](https://CRAN.R-project.org/package=shapviz)!!
+
+.scrollable.code70[
+```{r titanic-shap-all-plots, eval=TRUE, cache=TRUE, out.width = "80%"}
+p1 <- autoplot(ex.all)
+p2 <- autoplot(ex.all, type = "dependence", feature = "Age", X = X,
+               color_by = "Sex", alpha = 0.5) + theme(legend.position = c(0.8, 0.8))
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+Explaining an individual row (i.e., passenger); inspiration for this example taken from [here](https://modeloriented.github.io/iBreakDown/articles/vignette_iBreakDown_titanic.html).
+
+.pull-left[
+
+Meet Jack:
+
+.scrollable.code70[
+```{r titanic-jack}
+# Explain an individual passenger
+jack.dawson <- data.frame(
+  # Survived = factor(0, levels = 0:1),  # in case you haven't seen the movie
+  Pclass = 3,
+  Sex = factor("male", levels = c("female", "male")),
+  Age = 20,
+  SibSp = 0,
+  Parch = 0,
+  Fare = 15,  # lower end of third-class ticket prices
+  Embarked = factor("S", levels = c("", "C", "Q", "S"))
+)
+```
+]
+
+]
+.pull-right[
+
+```{r jack, echo=FALSE}
+knitr::include_graphics("images/jack.jpg")
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-jack-ex}
+(pred.jack <- pfun(rfo, newdata = jack.dawson))
+(baseline <- mean(pfun(rfo, newdata = X)))
+
+# Estimate feature contributions for Jack's predicted probability
+set.seed(754)  # for reproducibility
+(ex.jack <- explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
+                    adjust = TRUE, pred_wrapper = pfun))
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+```{r titanic-jack-ex-plot, echo=FALSE, fig.keep="last"}
+library(waterfall)
+
+res <- data.frame(
+  "feature" = paste0(names(jack.dawson), "=", t(jack.dawson)),
+  "shapley.value" = t(ex.jack)
+)
+palette("Okabe-Ito")
+waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
+               summaryname = "Total: f(x) - baseline", col = 2:3,
+               xlab = "Probability of survival")
+ladd(panel.abline(v = pred.jack, lty = 2, col = 1))
+ladd(panel.abline(v = baseline, lty = 2, col = 1))
+ladd(panel.text(0.105, 4, labels = "f(x)", col = 1))
+ladd(panel.text(0.375, 4, labels = "baseline", col = 1))
+palette("default")
+```
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+https://www.kaggle.com/mlg-ulb/creditcardfraud
+
+.scrollable.code70[
+```{r ccfraud-setup}
+library(fastshap)
+library(ggplot2)
+library(isotree)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# Read in credit card fraud data
+ccfraud <- data.table::fread("data/ccfraud.csv")
+
+# Randomize the data
+set.seed(2117)  # for reproducibility
+ccfraud <- ccfraud[sample(nrow(ccfraud)), ]
+
+# Split data into train/test sets
+set.seed(2013)  # for reproducibility
+trn.id <- sample(nrow(ccfraud), size = 10000, replace = FALSE)
+ccfraud.trn <- ccfraud[trn.id, ]
+ccfraud.tst <- ccfraud[-trn.id, ]
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+Anomaly detection via [isolation forest](https://en.wikipedia.org/wiki/Isolation_forest)
+
+.scrollable.code70[
+```{r ccfraud-ifo, cache=TRUE}
+# Fit a default isolation forest (unsupervised)
+ifo <- isolation.forest(ccfraud.trn[, 1L:30L], seed = 2223, nthreads = 1)
+
+# Compute anomaly scores for the test observations
+head(scores <- predict(ifo, newdata = ccfraud.tst))
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+```{r ccfraud-ifo-ex, cache=TRUE}
+# Find test observations corresponding to maximum anomaly score
+max.id <- which.max(scores)  # row ID for observation wit
+max.x <- ccfraud.tst[max.id, ]
+max(scores)
+
+X <- ccfraud.trn[, 1L:30L]  # feature columns only!
+max.x <- max.x[, 1L:30L]  # feature columns only!
+pfun <- function(object, newdata) {  # prediction wrapper
+  predict(object, newdata = newdata)
+}
+
+# Generate feature contributions
+set.seed(1351)  # for reproducibility
+ex <- explain(ifo, X = X, newdata = max.x, pred_wrapper = pfun, 
+              adjust = TRUE, nsim = 1000)
+
+# Should sum to f(x) - baseline whenever `adjust = TRUE`
+sum(ex)   
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+```{r ccfraud-ifo-ex-plot, echo=FALSE, fig.width=8, fig.keep="last"}
+res <- data.frame(
+  "feature" = paste0(names(ex), "=", round(t(max.x), digits = 2)),
+  "shapley.value" = as.numeric(as.vector(ex[1L,]))
+)
+pred.max.x <- pfun(ifo, newdata = max.x)
+baseline <- mean(pfun(ifo, newdata = X))
+palette("Okabe-Ito")
+waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
+               summaryname = "Total: f(x) - baseline", col = 2:3,
+               xlab = "Probability of survival")
+ladd(panel.abline(v = pred.max.x, lty = 2, col = 1))
+ladd(panel.abline(v = baseline, lty = 2, col = 1))
+ladd(panel.text(0.8, 8, labels = "f(x)", col = 1))
+ladd(panel.text(0.375, 8, labels = "baseline", col = 1))
+palette("default")
+```
+
+
+---
+class: middle, center
+
+## Thank you
+
+<img src="https://media.giphy.com/media/3orifiI9P8Uita7ySs/giphy.gif" style="width: 80%" />
+

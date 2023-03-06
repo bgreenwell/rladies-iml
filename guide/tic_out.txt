@@ -1,0 +1,181 @@
+             GGG   U   U  I  DDDD   EEEE
+            G   G  U   U  I  D   D  E
+            G      U   U  I  D   D  E
+            G  GG  U   U  I  D   D  EEE
+            G   G  U   U  I  D   D  E
+            G   G  U   U  I  D   D  E
+             GGG    UUU   I  DDDD   EEEE
+   
+ GUIDE Classification and Regression Trees and Forests
+ Version 40.3 (Build date: September 25, 2022)     
+ Compiled with NAG Fortran 6.2.0 on macOS Monterey 12.6                
+ Copyright (c) 1997-2022 Wei-Yin Loh. All rights reserved.
+ This software is based upon work supported by the U.S. Army Research Office,
+ the National Science Foundation and the National Institutes of Health.
+  
+ This job was started on 11/01/22 at 10:57
+  
+ Classification tree
+ No pruning
+ Data description file: tic_desc.txt
+ Training sample file: tic.txt
+ Missing value code: NA
+ Records in data file start on line 2
+ 23 N variables changed to S
+ D variable is CARAVAN
+ Number of records in data file: 5822
+ Length of longest entry in data file: 42
+ Number of classes: 2
+ Training sample class proportions of D variable CARAVAN:
+       Class  #Cases     Proportion
+ insurance       348     0.05977327
+ noinsurance    5474     0.94022673
+  
+      Total  #cases w/   #missing
+     #cases    miss. D  ord. vals   #X-var   #N-var   #F-var   #S-var
+       5822          0          0        0        0        0       23
+     #P-var   #M-var   #B-var   #C-var   #I-var
+          0        0        0       62        0
+ Number of cases used for training: 5822
+ Number of split variables: 85
+  
+ Importance scoring of variables
+ Simple node models
+ Estimated priors
+ Unit misclassification costs
+ Univariate split highest priority
+ Interaction splits 2nd priority; no linear splits
+ Split values for N and S variables based on exhaustive search
+ Maximum number of split levels: 4
+ Minimum node sample size: 58
+ Using 100 permutations to standardize means of importance scores
+ Finished permutations to standardize means of importance scores
+  
+ Note: final tree is shorter due to pruning of sibling nodes with same predicted values.
+ Structure of final tree. Each terminal node is marked with a T.
+  
+ Node cost is node misclassification cost divided by number of training cases
+        Node    Total    Train    Predicted        Node    Split          Interacting
+       label    cases    cases    class            cost    variables      variable
+           1T    5822     5822    noinsurance    5.977E-02 PPERSAUT 
+ Best split at root node is on PPERSAUT
+  
+ Number of terminal nodes of final tree: 1
+ Total number of nodes of final tree: 1
+ Best split variable (based on curvature test) at root node is PPERSAUT
+  
+ Classification tree:
+ For categorical variable splits, values not in training data go to the right
+  
+ Node 1: noinsurance
+ 
+ ***************************************************************
+  
+Node 1: Terminal node
+ ----------------------------
+ ******************************************************
+ 
+ Number of terminal nodes: 1
+ 
+ Scaled importance scores of predictor variables
+      Score     Rank  Variable
+  2.413E+00     1.00  PPERSAUT
+  2.168E+00     2.00  PBRAND
+  1.915E+00     3.00  PPLEZIER
+  1.821E+00     4.00  APERSAUT
+  1.597E+00     5.00  MOSHOOFD
+  1.551E+00     6.00  APLEZIER
+  1.464E+00     7.00  MKOOPKLA
+  1.418E+00     8.00  STYPE
+ --------- variables above this line have scores above 99% threshold (A) -----
+  1.054E+00     9.00  MINKGEM
+ --------- variables above this line have scores above 95% threshold (B) -----
+ --------- variables above this line have scores above 90% threshold (C) -----
+  9.455E-01    10.00  MOPLLAAG
+  8.933E-01    11.00  AWAPART
+  8.483E-01    12.00  MHHUUR
+  7.942E-01    13.00  PWAPART
+  7.710E-01    14.00  MINKM30
+ --------- variables above this line have scores above 80% threshold (D) -----
+  7.413E-01    15.00  MSKA
+  7.202E-01    16.00  MOPLHOOG
+  6.631E-01    17.00  MHKOOP
+  6.564E-01    18.00  ABRAND
+  6.450E-01    19.00  MSKC
+  6.096E-01    20.00  PZEILPL
+  5.706E-01    21.00  MBERARBG
+  5.266E-01    22.00  AZEILPL
+  5.177E-01    23.00  AWAOREG
+  4.789E-01    24.00  MBERHOOG
+  4.680E-01    25.00  ABYSTAND
+  4.384E-01    26.00  MAUT0
+  4.323E-01    27.00  MAUT1
+  4.093E-01    28.00  PWAOREG
+  3.937E-01    29.00  MINK4575
+  3.899E-01    30.00  PBYSTAND
+  3.263E-01    31.00  MINK7512
+  3.158E-01    32.00  MZFONDS
+  3.145E-01    33.00  PGEZONG
+  3.094E-01    34.00  MZPART
+  3.047E-01    35.00  PMOTSCO
+  3.035E-01    36.00  PFIETS
+  2.919E-01    37.00  MSKD
+  2.894E-01    38.00  AFIETS
+  2.871E-01    39.00  MBERMIDD
+  2.812E-01    40.00  MRELGE
+  2.316E-01    41.00  ABROM
+  2.040E-01    42.00  AGEZONG
+  1.912E-01    43.00  MBERARBO
+  1.902E-01    44.00  MRELOV
+  1.745E-01    45.00  MGODPR
+  1.739E-01    46.00  MSKB1
+  1.495E-01    47.00  PBROM
+  1.325E-01    48.00  MOPLMIDD
+  1.266E-01    49.00  MGODOV
+  1.234E-01    50.00  MGEMOMV
+  1.169E-01    51.00  AWALAND
+  1.164E-01    52.00  MBERZELF
+  1.125E-01    53.00  AAANHANG
+  1.100E-01    54.00  MGODGE
+  9.731E-02    55.00  MBERBOER
+  9.533E-02    56.00  PAANHANG
+  7.546E-02    57.00  MFALLEEN
+  7.407E-02    58.00  AINBOED
+  7.384E-02    59.00  ATRACTOR
+  6.211E-02    60.00  PWABEDR
+  6.189E-02    61.00  AWERKT
+  5.923E-02    62.00  MFWEKIND
+  5.631E-02    63.00  AWABEDR
+  5.508E-02    64.00  ALEVEN
+  4.711E-02    65.00  PLEVEN
+  4.227E-02    66.00  PINBOED
+  4.148E-02    67.00  MRELSA
+  3.915E-02    68.00  PTRACTOR
+  3.794E-02    69.00  PWERKT
+  3.745E-02    70.00  PWALAND
+  3.510E-02    71.00  MINK3045
+  3.474E-02    72.00  MGEMLEEF
+  3.300E-02    73.00  MAUT2
+  3.123E-02    74.00  APERSONG
+  2.714E-02    75.00  ABESAUT
+  2.711E-02    76.00  MGODRK
+  2.573E-02    77.00  AMOTSCO
+  2.554E-02    78.00  MINK123M
+  2.236E-02    79.00  AVRAAUT
+  2.165E-02    80.00  MAANTHUI
+  2.040E-02    81.00  PPERSONG
+  2.026E-02    82.00  AAUT
+  1.925E-02    83.00  PBESAUT
+  1.717E-02    84.00  MFGEKIND
+  5.849E-03    85.00  MSKB2
+ 
+ 99% threshold is 1.2363
+ 95% threshold is 1.0000
+ 90% threshold is 1.0000
+ 80% threshold is 0.7561
+ Number of variables above 99% threshold is 8
+ Number of variables between 95% and 99% thresholds is 1
+ Number of variables between 90% and 95% thresholds is 0
+ Number of variables between 80% and 90% thresholds is 5
+ Importance scores are stored in tic_vi.txt
+ Elapsed time in seconds: 92.587

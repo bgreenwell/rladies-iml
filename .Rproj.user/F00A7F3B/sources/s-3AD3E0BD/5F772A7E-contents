@@ -1,0 +1,104 @@
+# Load insurance company data from CoIL Challenge 2000
+data(ticdata, package = "kernlab")
+
+# SPlit into train/test (same splits used in challenge)
+tic.trn <- ticdata[1:5822, ]
+tic.tst <- ticdata[-(1:5822), ]
+
+# Class frequencies
+(tab <- table(tic.trn$CARAVAN))
+proportions(tab)  # similar to test data; ~ 16:1 ratio
+
+# The two goals of the CoIL challenge were: (1) to build a model from the 5,822
+# training records and use it to find the top 20% of customers in the test set
+# who are most likely to own caravan insurance policies and (2) to provide
+# insight into why some customers have caravan insurance policies and how they
+# differ from other customers.
+
+
+#-------------------------------------------------------------------------------
+# Single decision tree
+#-------------------------------------------------------------------------------
+
+library(partykit)  # for fitting conditional inference trees
+library(rpart)     # for fitting CART-like decision trees
+
+
+# CART-like decision tree
+set.seed(2115)  # for reproducibility
+ctrl <- rpart.control(minbucket = 1, cp = 0)
+cart <- rpart(CARAVAN ~ ., data = tic.trn, cp = 0)
+plotcp(cart)  # best CART model has zero splits
+
+vip::vip(cart)  # bias towards STYPE, a categorical 39 levels!
+
+# Conditional inference tree
+ct <- ctree(CARAVAN ~ ., data = tic.trn)
+plot(ct)
+
+# Variable importance plot
+vip::vip(ct)  # much better
+
+
+#-------------------------------------------------------------------------------
+# GUIDE
+#
+# * LOTUS example: https://pages.stat.wisc.edu/~loh/treeprogs/lotus/lotus.pdf
+#-------------------------------------------------------------------------------
+
+tic.unordered <- tic.trn
+for (i in names(tic.unordered)) {
+  if (is.ordered(tic.unordered[[i]])) {
+    tic.unordered[[i]] <- factor(tic.unordered[[i]], ordered = FALSE)
+  }
+}
+treemisc::guide_setup(tic.unordered, path = "guide/", 
+                      file.name = "tic", dv = "CARAVAN")
+
+vis <- read.table("guide/tic_vi.txt", header = TRUE)
+top <- vis$Variable[vis$Type == "A"]
+tibble::as_tibble(top)
+
+
+#-------------------------------------------------------------------------------
+# Random forest
+#-------------------------------------------------------------------------------
+
+library(ranger)
+
+
+# Random (probability) forest
+set.seed(2125)  # for reproducibility
+rfo <- ranger(CARAVAN ~ ., data = tic.trn, probability = TRUE, num.trees = 1000)
+
+# prob <- rfo$predictions
+prob <- predict(rfo, data = tic.tst)$predictions
+
+# ROC curve
+pred <- ROCR::prediction(prob[, "insurance"], 
+                         labels = ifelse(tic.tst$CARAVAN == "insurance", 1, 0))
+perf <- ROCR::performance(pred, measure = "tpr", x.measure = "fpr")
+
+# Calibration curve
+cal <- treemisc::calibrate(prob[, "insurance"], y = tic.tst$CARAVAN,
+                           pos.class = "insurance", method = "pratt")
+
+par(mfrow = c(1, 2), las = 1)
+plot(perf, main = "ROC curve")
+abline(0, 1, lty = 2, col = 2)
+plot(cal$probs, type = "l", xlab = "Original probability", 
+     ylab = "Calibrated probability", main = "Calibration curve")
+abline(0, 1, lty = 2, col = 2)
+
+# Which variable seem important
+vip::vip(rfo)  # apparent bias towards STYPE, a categorical with 39 levels!
+
+# Random (probability) forest with bias-corrected VI
+set.seed(2200)  # for reproducibility
+rfo.vi <- ranger(CARAVAN ~ ., data = tic.trn, probability = TRUE,
+                 num.trees = 1000, importance = "impurity_corrected",
+                 respect.unordered.factors = "ignore")
+vip::vip(rfo.vi)  # apparent bias towards STYPE, a categorical with 39 levels!
+
+library(pdp)
+partial(rfo, pred.var = "APERSAUT", plot = TRUE, rug = TRUE)

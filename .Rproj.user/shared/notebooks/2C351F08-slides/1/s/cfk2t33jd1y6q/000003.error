@@ -1,0 +1,1 @@
+{"frames":[{"func":"vi(pp, method = \"permute\", target = \"y\", metric = \"rsquared\", \n    pred_wrapper = predict, nsim = 15)","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error in vi(pp, method = \"permute\", target = \"y\", metric = \"rsquared\",  : \n  object 'pp' not found\n"}
